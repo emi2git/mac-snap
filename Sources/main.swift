@@ -1,9 +1,8 @@
 // Mac Snap — drag a window to a screen edge or corner to snap it (like Magnet / Windows Snap).
 //   left / right edge  → half        corners → quarter        top edge → maximize
-// Hotkeys (⌃⌥): ← → ↑ ↓ halves, U I J K quarters, Return maximize, Delete restore.
+// No keyboard shortcuts — everything else is in the menu-bar icon.
 import AppKit
 import ApplicationServices
-import Carbon.HIToolbox
 import ServiceManagement
 
 // MARK: - Zones
@@ -16,6 +15,17 @@ enum Zone: String, CaseIterable {
         case .left: "Left Half"; case .right: "Right Half"; case .top: "Top Half"; case .bottom: "Bottom Half"
         case .topLeft: "Top Left"; case .topRight: "Top Right"; case .bottomLeft: "Bottom Left"; case .bottomRight: "Bottom Right"
         case .maximize: "Maximize"
+        }
+    }
+
+    /// Menu-bar icon showing this layout.
+    var symbol: String {
+        switch self {
+        case .left: "rectangle.lefthalf.inset.filled"; case .right: "rectangle.righthalf.inset.filled"
+        case .top: "rectangle.tophalf.inset.filled"; case .bottom: "rectangle.bottomhalf.inset.filled"
+        case .topLeft: "rectangle.inset.topleft.filled"; case .topRight: "rectangle.inset.topright.filled"
+        case .bottomLeft: "rectangle.inset.bottomleft.filled"; case .bottomRight: "rectangle.inset.bottomright.filled"
+        case .maximize: "rectangle.inset.filled"
         }
     }
 
@@ -113,6 +123,17 @@ enum AX {
     }
 }
 
+// MARK: - Menu-bar icon: follows how you drag
+
+enum Icon {
+    static let idle = "rectangle.split.2x2"
+    static var set: (String) -> Void = { _ in }
+    /// Last snapped layout (shown when not dragging).
+    static var last: String = UserDefaults.standard.string(forKey: "lastZoneIcon") ?? idle {
+        didSet { UserDefaults.standard.set(last, forKey: "lastZoneIcon"); set(last) }
+    }
+}
+
 // MARK: - Snapping
 
 final class Snapper {
@@ -132,12 +153,14 @@ final class Snapper {
         // Keep the original frame across snap→snap; start over if the window was moved since.
         let original = previous[key].map { close($0.placed, cur) ? $0.original : cur } ?? cur
         AX.setFrame(w, AX.flip(zone.rect(in: scr.visibleFrame)))
+        Icon.last = zone.symbol
         previous[key] = (original, AX.frame(w) ?? cur)
     }
 
     func restore(_ w: AXUIElement) {
         guard let e = previous.removeValue(forKey: CFHash(w)), let cur = AX.frame(w), close(e.placed, cur) else { return }
         AX.setFrame(w, e.original)
+        Icon.last = Icon.idle
     }
 
     private func close(_ a: CGRect, _ b: CGRect) -> Bool {
@@ -233,8 +256,9 @@ final class DragWatcher {
         }
         let p = NSEvent.mouseLocation
         guard let scr = NSScreen.screens.first(where: { NSMouseInRect(p, $0.frame, false) }),
-              let z = Zone.at(p, on: scr) else { zone = nil; overlay.hide(); return }
+              let z = Zone.at(p, on: scr) else { zone = nil; overlay.hide(); Icon.set(Icon.last); return }
         zone = z; zoneScreen = scr
+        Icon.set(z.symbol)
         overlay.show(z, on: scr)
     }
 
@@ -245,6 +269,7 @@ final class DragWatcher {
                 Snapper.shared.snap(w, to: z, on: scr)
             }
         }
+        else { Icon.set(Icon.last) }
         overlay.hide()
         reset()
     }
@@ -252,48 +277,11 @@ final class DragWatcher {
     private func reset() { window = nil; startPos = nil; moving = false; zone = nil; zoneScreen = nil }
 }
 
-// MARK: - Hotkeys (⌃⌥)
+// MARK: - Menu actions (act on the front window)
 
-final class Hotkeys {
-    enum Action { case zone(Zone), restore }
-    private static var actions: [UInt32: Action] = [:]
-    private var refs: [EventHotKeyRef?] = []
-
-    func register() {
-        let keys: [(Int, Action)] = [
-            (kVK_LeftArrow, .zone(.left)), (kVK_RightArrow, .zone(.right)),
-            (kVK_UpArrow, .zone(.top)), (kVK_DownArrow, .zone(.bottom)),
-            (kVK_ANSI_U, .zone(.topLeft)), (kVK_ANSI_I, .zone(.topRight)),
-            (kVK_ANSI_J, .zone(.bottomLeft)), (kVK_ANSI_K, .zone(.bottomRight)),
-            (kVK_Return, .zone(.maximize)), (kVK_Delete, .restore),
-        ]
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
-            var id = EventHotKeyID()
-            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
-                              nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
-            if let a = Hotkeys.actions[id.id] { Hotkeys.perform(a) }
-            return noErr
-        }, 1, &spec, nil, nil)
-        for (i, (code, action)) in keys.enumerated() {
-            let id = UInt32(i + 1)
-            Hotkeys.actions[id] = action
-            var ref: EventHotKeyRef?
-            let err = RegisterEventHotKey(UInt32(code), UInt32(controlKey | optionKey),
-                                EventHotKeyID(signature: OSType(0x454D_534E), id: id), // 'EMSN'
-                                GetApplicationEventTarget(), 0, &ref)
-            if err != noErr { NSLog("Mac Snap: hotkey \(code) taken (\(err))") }
-            refs.append(ref)
-        }
-    }
-
-    static func perform(_ a: Action) {
-        guard let w = AX.focusedWindow() else { NSSound.beep(); return }
-        switch a {
-        case .zone(let z): Snapper.shared.snap(w, to: z)
-        case .restore: Snapper.shared.restore(w)
-        }
-    }
+enum Actions {
+    static func snapFront(_ z: Zone) { guard let w = AX.focusedWindow() else { NSSound.beep(); return }; Snapper.shared.snap(w, to: z) }
+    static func restoreFront() { guard let w = AX.focusedWindow() else { NSSound.beep(); return }; Snapper.shared.restore(w) }
 }
 
 // MARK: - App
@@ -301,21 +289,11 @@ final class Hotkeys {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var item: NSStatusItem!
     private let watcher = DragWatcher()
-    private let hotkeys = Hotkeys()
     private var trustItem: NSMenuItem!
     private var loginItem: NSMenuItem!
-    private var iconItem: NSMenuItem!
-    static let icons = [("Grid", "rectangle.split.2x2"), ("Halves", "rectangle.split.2x1"),
-                        ("Thirds", "rectangle.split.3x1"), ("Left Half", "rectangle.lefthalf.inset.filled"), ("Squares", "square.grid.2x2"), ("Window", "macwindow")]
-    private var iconSymbol: String { UserDefaults.standard.string(forKey: "icon") ?? "rectangle.split.2x2" }
-
-    private func applyIcon() {
-        item.button?.image = NSImage(systemSymbolName: iconSymbol, accessibilityDescription: "Mac Snap")
-            ?? NSImage(systemSymbolName: "rectangle.split.2x2", accessibilityDescription: "Mac Snap")
-    }
-    @objc func pickIcon(_ sender: NSMenuItem) {
-        UserDefaults.standard.set(sender.representedObject as? String, forKey: "icon")
-        applyIcon()
+    private func showIcon(_ symbol: String) {
+        item.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Mac Snap")
+            ?? NSImage(systemSymbolName: Icon.idle, accessibilityDescription: "Mac Snap")
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -329,46 +307,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if UserDefaults.standard.object(forKey: posKey) == nil { UserDefaults.standard.set(230, forKey: posKey) }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.autosaveName = "MacSnap"
-        applyIcon()
+        Icon.set = { [weak self] in self?.showIcon($0) }
+        showIcon(Icon.last)
         let menu = NSMenu()
         menu.delegate = self
         trustItem = NSMenuItem(title: "", action: #selector(openAXSettings), keyEquivalent: "")
         menu.addItem(trustItem)
         menu.addItem(.separator())
-        let keys: [Zone: (String, NSEvent.ModifierFlags)] = [
-            .left: ("\u{F702}", []), .right: ("\u{F703}", []), .top: ("\u{F700}", []), .bottom: ("\u{F701}", []),
-            .topLeft: ("u", []), .topRight: ("i", []), .bottomLeft: ("j", []), .bottomRight: ("k", []), .maximize: ("\r", []),
-        ]
         for z in [Zone.left, .right, .top, .bottom, .topLeft, .topRight, .bottomLeft, .bottomRight, .maximize] {
             if z == .topLeft || z == .maximize { menu.addItem(.separator()) }
-            let mi = NSMenuItem(title: z.title, action: #selector(snapFromMenu(_:)), keyEquivalent: keys[z]!.0)
-            mi.keyEquivalentModifierMask = [.control, .option]
+            let mi = NSMenuItem(title: z.title, action: #selector(snapFromMenu(_:)), keyEquivalent: "")
             mi.representedObject = z.rawValue
             mi.target = self
             menu.addItem(mi)
         }
-        let r = NSMenuItem(title: "Restore", action: #selector(restoreFromMenu), keyEquivalent: "\u{8}")
-        r.keyEquivalentModifierMask = [.control, .option]; r.target = self
+        let r = NSMenuItem(title: "Restore", action: #selector(restoreFromMenu), keyEquivalent: "")
+        r.target = self
         menu.addItem(r)
         menu.addItem(.separator())
-        let iconMenu = NSMenu()
-        for (name, symbol) in AppDelegate.icons {
-            let mi = NSMenuItem(title: name, action: #selector(pickIcon(_:)), keyEquivalent: "")
-            mi.image = NSImage(systemSymbolName: symbol, accessibilityDescription: name)
-            mi.representedObject = symbol; mi.target = self
-            iconMenu.addItem(mi)
-        }
-        iconItem = NSMenuItem(title: "Menu Bar Icon", action: nil, keyEquivalent: "")
-        iconItem.submenu = iconMenu
-        menu.addItem(iconItem)
         loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         loginItem.target = self
         menu.addItem(loginItem)
-        menu.addItem(NSMenuItem(title: "Quit Mac Snap", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Mac Snap", action: #selector(NSApplication.terminate(_:)), keyEquivalent: ""))
         item.menu = menu
 
         watcher.start()
-        hotkeys.register()
         // Launch at login is on unless turned off; re-registering also follows the app if it was renamed/moved.
         if UserDefaults.standard.object(forKey: "launchAtLogin") as? Bool ?? true { try? SMAppService.mainApp.register() }
     }
@@ -378,15 +341,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         trustItem.title = ok ? "✓ Accessibility allowed" : "⚠︎ Allow Accessibility access…"
         trustItem.target = ok ? nil : self
         trustItem.action = ok ? nil : #selector(openAXSettings)
-        for mi in iconItem.submenu?.items ?? [] { mi.state = (mi.representedObject as? String) == iconSymbol ? .on : .off }
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
     @objc func snapFromMenu(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let z = Zone(rawValue: raw) else { return }
-        Hotkeys.perform(.zone(z))
+        Actions.snapFront(z)
     }
-    @objc func restoreFromMenu() { Hotkeys.perform(.restore) }
+    @objc func restoreFromMenu() { Actions.restoreFront() }
 
     @objc func openAXSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)

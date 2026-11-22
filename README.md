@@ -1,6 +1,6 @@
 # Mac Snap
 
-Snap any Mac window into a half, a quarter or full screen — by dragging it to the screen edge, or with a shortcut. Like Magnet / Windows Snap.
+Snap any Mac window into a half, a quarter or full screen by dragging it to the screen edge. No keyboard shortcuts. Like Magnet / Windows Snap.
 
 ## Install
 
@@ -19,7 +19,8 @@ System Settings › Privacy & Security › Accessibility (turn on *Mac Snap*). W
 ## Run
 
 - Double-click `~/Applications/Mac Snap.app` (it starts by itself at login — see menu).
-- It has no Dock icon. It lives in the **top menu bar** as a small grid icon ▦, next to Wi‑Fi.
+- It has no Dock icon. It lives in the **top menu bar**, next to Wi‑Fi.
+- The icon **follows how you drag**: while you drag to an edge it shows that layout (left half, top-right quarter, full…), and afterwards it keeps showing the last layout you snapped to. Restore puts it back to the grid ▦.
 - Can't see it? On a MacBook with a notch, a full menu bar hides icons behind the notch.
   Hold ⌘ and drag the icon to move it, or quit some other menu-bar apps.
 
@@ -37,30 +38,13 @@ Drag a window by its title bar and push the mouse against the screen edge. A blu
 | Bottom-left corner        | Bottom-left quarter |
 | Bottom-right corner       | Bottom-right quarter |
 
-## Keyboard shortcuts
-
-All use **⌃ Control + ⌥ Option**, and act on the front window.
-
-| Shortcut   | Action              |
-|------------|---------------------|
-| ⌃⌥ ←       | Left half           |
-| ⌃⌥ →       | Right half          |
-| ⌃⌥ ↑       | Top half            |
-| ⌃⌥ ↓       | Bottom half         |
-| ⌃⌥ U       | Top-left quarter    |
-| ⌃⌥ I       | Top-right quarter   |
-| ⌃⌥ J       | Bottom-left quarter |
-| ⌃⌥ K       | Bottom-right quarter|
-| ⌃⌥ Return  | Full screen         |
-| ⌃⌥ Delete  | Restore previous size |
-
 ## Menu bar options
 
 Click the icon in the top bar:
 
 - **Accessibility status** — ✓ when allowed; click to open the setting if not.
-- **Left / Right / Top / Bottom Half, the four quarters, Maximize, Restore** — same as the shortcuts.
-- **Menu Bar Icon** — pick the icon's look: Grid, Halves, Thirds, Window, Left Half, Squares.
+- **Left / Right / Top / Bottom Half, the four quarters, Maximize** — snap the front window without dragging.
+- **Restore** — put the front window back to its size before snapping.
 - **Launch at Login** — on by default.
 - **Quit Mac Snap**
 
@@ -70,5 +54,5 @@ Click the icon in the top bar:
 swift Tests/e2e.swift
 ```
 
-Drags a real Finder window to every edge/corner and presses every shortcut, then checks the window's frame.
+Drags a real Finder window to every edge/corner and clicks every menu item, then checks the window's frame and the menu-bar icon.
 (The terminal needs Accessibility access too.)

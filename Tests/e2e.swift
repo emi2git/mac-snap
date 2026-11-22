@@ -1,5 +1,5 @@
 // End-to-end test: drags a real Finder window to each edge/corner with synthetic mouse events,
-// then tries the ⌃⌥ hotkeys, and checks the window frame. Needs Mac Snap running + Accessibility for both.
+// then the menu-bar menu items, and checks the window frame. Needs Mac Snap running + Accessibility for both.
 //   swift Tests/e2e.swift
 import AppKit
 import ApplicationServices
@@ -70,27 +70,47 @@ for (name, target) in edges {
     wait(0.3)
     mouse(.leftMouseUp, target); wait(0.6)
     check(name, "drag  ")
+    // Menu-bar icon shows the layout just used.
+    let icon = UserDefaults(suiteName: "com.emi2git.emisnap")?.string(forKey: "lastZoneIcon") ?? "-"
+    let wantIcon = ["left": "lefthalf", "right": "righthalf", "maximize": "rectangle.inset.filled", "topLeft": "topleft",
+                    "topRight": "topright", "bottomLeft": "bottomleft", "bottomRight": "bottomright"][name]!
+    if !icon.contains(wantIcon) { fails += 1 }
+    print(icon.contains(wantIcon) ? "PASS" : "FAIL", "icon  ", name, icon)
 }
 
-let keys: [(String, CGKeyCode)] = [("left", 123), ("right", 124), ("top", 126), ("bottom", 125),
-                                    ("topLeft", 32), ("topRight", 34), ("bottomLeft", 38), ("bottomRight", 40), ("maximize", 36)]
-for (name, code) in keys {
-    setFrame(win, start); finder.activate(); wait(0.4)
-    for down in [true, false] {
-        let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!
-        e.flags = [.maskControl, .maskAlternate]
-        if (123...126).contains(code) { e.flags.formUnion([.maskSecondaryFn, .maskNumericPad]) } // real arrow keys carry these
-        e.post(tap: .cghidEventTap)
-    }
-    wait(0.5)
-    check(name, "hotkey")
+// Menu-bar menu items act on the front window.
+let snapApp = NSRunningApplication.runningApplications(withBundleIdentifier: "com.emi2git.emisnap")[0]
+let extras: AXUIElement = attr(AXUIElementCreateApplication(snapApp.processIdentifier), kAXExtrasMenuBarAttribute)!
+let statusItem = (attr(extras, kAXChildrenAttribute) as [AXUIElement]?)![0]
+func pressMenu(_ title: String) {
+    finder.activate(); wait(0.3)
+    AXUIElementPerformAction(statusItem, kAXPressAction as CFString); wait(0.8)
+    let menu = (attr(statusItem, kAXChildrenAttribute) as [AXUIElement]?)![0]
+    let item = (attr(menu, kAXChildrenAttribute) as [AXUIElement]?)!.first { (attr($0, kAXTitleAttribute) as String?) == title }!
+    AXUIElementPerformAction(item, kAXPressAction as CFString); wait(0.5)
 }
-// Restore (⌃⌥⌫) returns to the pre-snap frame.
-for down in [true, false] { let e = CGEvent(keyboardEventSource: nil, virtualKey: 51, keyDown: down)!; e.flags = [.maskControl, .maskAlternate]; e.post(tap: .cghidEventTap) }
-wait(0.5)
+let menuTitles = ["left": "Left Half", "right": "Right Half", "top": "Top Half", "bottom": "Bottom Half", "topLeft": "Top Left",
+                  "topRight": "Top Right", "bottomLeft": "Bottom Left", "bottomRight": "Bottom Right", "maximize": "Maximize"]
+for (name, title) in menuTitles.sorted(by: { $0.key < $1.key }) {
+    setFrame(win, start); finder.activate(); wait(0.4)
+    pressMenu(title)
+    check(name, "menu  ")
+}
+pressMenu("Restore")
 let r = frame(win), restoredOK = abs(r.minX - start.minX) < 3 && abs(r.width - start.width) < 3
 if !restoredOK { fails += 1 }
-print(restoredOK ? "PASS" : "FAIL", "hotkey restore", restoredOK ? "" : "got \(r)")
+print(restoredOK ? "PASS" : "FAIL", "menu   restore", restoredOK ? "" : "got \(r)")
+
+// No keyboard shortcuts: ⌃⌥← must leave the window alone.
+setFrame(win, start); finder.activate(); wait(0.4)
+for down in [true, false] {
+    let e = CGEvent(keyboardEventSource: nil, virtualKey: 123, keyDown: down)!
+    e.flags = [.maskControl, .maskAlternate, .maskSecondaryFn, .maskNumericPad]; e.post(tap: .cghidEventTap)
+}
+wait(0.5)
+let k = frame(win), untouched = abs(k.minX - start.minX) < 3 && abs(k.width - start.width) < 3
+if !untouched { fails += 1 }
+print(untouched ? "PASS" : "FAIL", "no shortcut (⌃⌥← does nothing)")
 setFrame(win, original)
 print(fails == 0 ? "ALL PASS" : "\(fails) FAILED")
 exit(fails == 0 ? 0 : 1)
