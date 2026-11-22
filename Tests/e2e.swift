@@ -1,5 +1,5 @@
 // End-to-end test: drags a real Finder window to each edge/corner with synthetic mouse events,
-// then tries the ⌃⌥ hotkeys, and checks the window frame. Needs Emi Snap running + Accessibility for both.
+// then tries the ⌃⌥ hotkeys, and checks the window frame. Needs Mac Snap running + Accessibility for both.
 //   swift Tests/e2e.swift
 import AppKit
 import ApplicationServices
@@ -45,7 +45,10 @@ wait(1.5)
 let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder")[0]
 finder.activate()
 wait(0.5)
-guard let win: AXUIElement = attr(AXUIElementCreateApplication(finder.processIdentifier), kAXFocusedWindowAttribute) else { print("no Finder window"); exit(1) }
+// A real Finder window (not the desktop, which also shows up as a window)
+let wins: [AXUIElement] = attr(AXUIElementCreateApplication(finder.processIdentifier), kAXWindowsAttribute) ?? []
+guard let win = wins.first(where: { (attr($0, kAXSubroleAttribute) as String?) == kAXStandardWindowSubrole }) else { print("no Finder window"); exit(1) }
+AXUIElementPerformAction(win, kAXRaiseAction as CFString)
 let original = frame(win)
 var fails = 0
 func check(_ name: String, _ how: String) {

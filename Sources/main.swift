@@ -1,4 +1,4 @@
-// Emi Snap — drag a window to a screen edge or corner to snap it (like Magnet / Windows Snap).
+// Mac Snap — drag a window to a screen edge or corner to snap it (like Magnet / Windows Snap).
 //   left / right edge  → half        corners → quarter        top edge → maximize
 // Hotkeys (⌃⌥): ← → ↑ ↓ halves, U I J K quarters, Return maximize, Delete restore.
 import AppKit
@@ -282,7 +282,7 @@ final class Hotkeys {
             let err = RegisterEventHotKey(UInt32(code), UInt32(controlKey | optionKey),
                                 EventHotKeyID(signature: OSType(0x454D_534E), id: id), // 'EMSN'
                                 GetApplicationEventTarget(), 0, &ref)
-            if err != noErr { NSLog("Emi Snap: hotkey \(code) taken (\(err))") }
+            if err != noErr { NSLog("Mac Snap: hotkey \(code) taken (\(err))") }
             refs.append(ref)
         }
     }
@@ -308,10 +308,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         AXUIElementSetMessagingTimeout(AX.system, 0.3)
         let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
-        if !trusted { NSLog("Emi Snap: waiting for Accessibility permission") }
+        if !trusted { NSLog("Mac Snap: waiting for Accessibility permission") }
 
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "rectangle.split.2x2", accessibilityDescription: "Emi Snap")
+        item.button?.image = NSImage(systemSymbolName: "rectangle.split.2x2", accessibilityDescription: "Mac Snap")
         let menu = NSMenu()
         menu.delegate = self
         trustItem = NSMenuItem(title: "", action: #selector(openAXSettings), keyEquivalent: "")
@@ -336,16 +336,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         loginItem.target = self
         menu.addItem(loginItem)
-        menu.addItem(NSMenuItem(title: "Quit Emi Snap", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Mac Snap", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         item.menu = menu
 
         watcher.start()
         hotkeys.register()
-        // First launch: turn on launch-at-login.
-        if !UserDefaults.standard.bool(forKey: "didSetupLogin") {
-            try? SMAppService.mainApp.register()
-            UserDefaults.standard.set(true, forKey: "didSetupLogin")
-        }
+        // Launch at login is on unless turned off; re-registering also follows the app if it was renamed/moved.
+        if UserDefaults.standard.object(forKey: "launchAtLogin") as? Bool ?? true { try? SMAppService.mainApp.register() }
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -368,8 +365,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func toggleLogin() {
         let s = SMAppService.mainApp
-        do { if s.status == .enabled { try s.unregister() } else { try s.register() } }
-        catch { NSLog("Emi Snap: login item: \(error)") }
+        let on = s.status != .enabled
+        UserDefaults.standard.set(on, forKey: "launchAtLogin")
+        do { if on { try s.register() } else { try s.unregister() } }
+        catch { NSLog("Mac Snap: login item: \(error)") }
     }
 }
 
