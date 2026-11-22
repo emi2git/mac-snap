@@ -20,7 +20,7 @@ System Settings › Privacy & Security › Accessibility (turn on *Mac Snap*). W
 
 - Double-click `~/Applications/Mac Snap.app` (it starts by itself at login — see menu).
 - It has no Dock icon. It lives in the **top menu bar**, next to Wi‑Fi.
-- The icon **follows how you drag**: while you drag to an edge it shows that layout (left half, top-right quarter, full…), and afterwards it keeps showing the last layout you snapped to. Restore puts it back to the grid ▦.
+- The icon **follows how you drag**: while you drag to an edge it shows that layout (left half, top-right quarter, full…), and afterwards it keeps showing the last layout you snapped to.
 - Can't see it? On a MacBook with a notch, a full menu bar hides icons behind the notch.
   Hold ⌘ and drag the icon to move it, or quit some other menu-bar apps.
 
@@ -40,13 +40,14 @@ Drag a window by its title bar and push the mouse against the screen edge. A blu
 
 ## Menu bar options
 
-Click the icon in the top bar:
+Click the icon in the top bar. There are no window commands here — snapping is done only by dragging.
 
 - **Accessibility status** — ✓ when allowed; click to open the setting if not.
-- **Left / Right / Top / Bottom Half, the four quarters, Maximize** — snap the front window without dragging.
-- **Restore** — put the front window back to its size before snapping.
+- **Help — How to Snap…** — opens a guide showing where to drag and what each spot does.
 - **Launch at Login** — on by default.
 - **Quit Mac Snap**
+
+To unsnap a window, just drag it away and resize it as usual.
 
 ## Test
 
@@ -54,5 +55,5 @@ Click the icon in the top bar:
 swift Tests/e2e.swift
 ```
 
-Drags a real Finder window to every edge/corner and clicks every menu item, then checks the window's frame and the menu-bar icon.
+Drags a real Finder window to every edge/corner then checks the window's frame and the menu-bar icon, that the menu has no window commands, and that Help opens.
 (The terminal needs Accessibility access too.)

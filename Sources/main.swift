@@ -1,6 +1,6 @@
 // Mac Snap — drag a window to a screen edge or corner to snap it (like Magnet / Windows Snap).
 //   left / right edge  → half        corners → quarter        top edge → maximize
-// No keyboard shortcuts — everything else is in the menu-bar icon.
+// No keyboard shortcuts and no window commands in the menu — dragging is the whole app. Menu → Help explains it.
 import AppKit
 import ApplicationServices
 import ServiceManagement
@@ -8,12 +8,12 @@ import ServiceManagement
 // MARK: - Zones
 
 enum Zone: String, CaseIterable {
-    case left, right, top, bottom, topLeft, topRight, bottomLeft, bottomRight, maximize
+    case left, right, topLeft, topRight, bottomLeft, bottomRight, maximize
 
     var title: String {
         switch self {
-        case .left: "Left Half"; case .right: "Right Half"; case .top: "Top Half"; case .bottom: "Bottom Half"
-        case .topLeft: "Top Left"; case .topRight: "Top Right"; case .bottomLeft: "Bottom Left"; case .bottomRight: "Bottom Right"
+        case .left: "Left half"; case .right: "Right half"
+        case .topLeft: "Top-left quarter"; case .topRight: "Top-right quarter"; case .bottomLeft: "Bottom-left quarter"; case .bottomRight: "Bottom-right quarter"
         case .maximize: "Maximize"
         }
     }
@@ -22,7 +22,6 @@ enum Zone: String, CaseIterable {
     var symbol: String {
         switch self {
         case .left: "rectangle.lefthalf.inset.filled"; case .right: "rectangle.righthalf.inset.filled"
-        case .top: "rectangle.tophalf.inset.filled"; case .bottom: "rectangle.bottomhalf.inset.filled"
         case .topLeft: "rectangle.inset.topleft.filled"; case .topRight: "rectangle.inset.topright.filled"
         case .bottomLeft: "rectangle.inset.bottomleft.filled"; case .bottomRight: "rectangle.inset.bottomright.filled"
         case .maximize: "rectangle.inset.filled"
@@ -35,8 +34,6 @@ enum Zone: String, CaseIterable {
         switch self {
         case .left:        return NSRect(x: v.minX, y: v.minY, width: w, height: v.height)
         case .right:       return NSRect(x: v.minX + w, y: v.minY, width: v.width - w, height: v.height)
-        case .top:         return NSRect(x: v.minX, y: v.minY + h, width: v.width, height: v.height - h)
-        case .bottom:      return NSRect(x: v.minX, y: v.minY, width: v.width, height: h)
         case .topLeft:     return NSRect(x: v.minX, y: v.minY + h, width: w, height: v.height - h)
         case .topRight:    return NSRect(x: v.minX + w, y: v.minY + h, width: v.width - w, height: v.height - h)
         case .bottomLeft:  return NSRect(x: v.minX, y: v.minY, width: w, height: h)
@@ -92,11 +89,6 @@ enum AX {
         return attr(el, kAXWindowAttribute)
     }
 
-    static func focusedWindow() -> AXUIElement? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        return attr(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedWindowAttribute)
-    }
-
     static func position(_ w: AXUIElement) -> CGPoint? {
         guard let v: AXValue = attr(w, kAXPositionAttribute) else { return nil }
         var p = CGPoint.zero; AXValueGetValue(v, .cgPoint, &p); return p
@@ -138,37 +130,11 @@ enum Icon {
 
 final class Snapper {
     static let shared = Snapper()
-    private var previous: [CFHashCode: (original: CGRect, placed: CGRect)] = [:]   // for Restore
 
-    func screen(for quartzFrame: CGRect) -> NSScreen {
-        let cocoa = AX.flip(quartzFrame)                  // flip is its own inverse
-        let center = NSPoint(x: cocoa.midX, y: cocoa.midY)
-        return NSScreen.screens.first { NSMouseInRect(center, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
-    }
-
-    func snap(_ w: AXUIElement, to zone: Zone, on screen: NSScreen? = nil) {
-        guard let cur = AX.frame(w) else { return }
-        let scr = screen ?? self.screen(for: cur)
-        let key = CFHash(w)
-        // Keep the original frame across snap→snap; start over if the window was moved since.
-        let original = previous[key].map { close($0.placed, cur) ? $0.original : cur } ?? cur
-        AX.setFrame(w, AX.flip(zone.rect(in: scr.visibleFrame)))
+    func snap(_ w: AXUIElement, to zone: Zone, on screen: NSScreen) {
+        AX.setFrame(w, AX.flip(zone.rect(in: screen.visibleFrame)))
         Icon.last = zone.symbol
-        previous[key] = (original, AX.frame(w) ?? cur)
     }
-
-    func restore(_ w: AXUIElement) {
-        guard let e = previous.removeValue(forKey: CFHash(w)), let cur = AX.frame(w), close(e.placed, cur) else { return }
-        AX.setFrame(w, e.original)
-        Icon.last = Icon.idle
-    }
-
-    private func close(_ a: CGRect, _ b: CGRect) -> Bool {
-        abs(a.minX - b.minX) < 4 && abs(a.minY - b.minY) < 4 && abs(a.width - b.width) < 4 && abs(a.height - b.height) < 4
-    }
-
-    /// Forget the saved frame once the user moves a snapped window themselves.
-    func forget(_ w: AXUIElement) { previous.removeValue(forKey: CFHash(w)) }
 }
 
 // MARK: - Preview overlay
@@ -252,7 +218,6 @@ final class DragWatcher {
             guard let start = startPos, let now = AX.position(w), now != start,
                   (AX.size(w)?.width ?? 0) > 0 else { return }
             moving = true
-            Snapper.shared.forget(w)
         }
         let p = NSEvent.mouseLocation
         guard let scr = NSScreen.screens.first(where: { NSMouseInRect(p, $0.frame, false) }),
@@ -265,7 +230,7 @@ final class DragWatcher {
     private func up() {
         if moving, let w = window, let z = zone {
             // Let the app finish its own drag first, then place the window.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [scr = zoneScreen] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [scr = zoneScreen!] in
                 Snapper.shared.snap(w, to: z, on: scr)
             }
         }
@@ -277,11 +242,104 @@ final class DragWatcher {
     private func reset() { window = nil; startPos = nil; moving = false; zone = nil; zoneScreen = nil }
 }
 
-// MARK: - Menu actions (act on the front window)
+// MARK: - Help window
 
-enum Actions {
-    static func snapFront(_ z: Zone) { guard let w = AX.focusedWindow() else { NSSound.beep(); return }; Snapper.shared.snap(w, to: z) }
-    static func restoreFront() { guard let w = AX.focusedWindow() else { NSSound.beep(); return }; Snapper.shared.restore(w) }
+enum HelpWindow {
+    /// (zone, where the mouse goes in 0…1 screen coords with y up, what to say)
+    static let cards: [(Zone, CGPoint, String)] = [
+        (.left, CGPoint(x: 0, y: 0.5), "Left edge"), (.right, CGPoint(x: 1, y: 0.5), "Right edge"),
+        (.maximize, CGPoint(x: 0.5, y: 1), "Top edge"), (.topLeft, CGPoint(x: 0, y: 1), "Top-left corner"),
+        (.topRight, CGPoint(x: 1, y: 1), "Top-right corner"), (.bottomLeft, CGPoint(x: 0, y: 0), "Bottom-left corner"),
+        (.bottomRight, CGPoint(x: 1, y: 0), "Bottom-right corner"),
+    ]
+
+    static func label(_ text: String, size: CGFloat, weight: NSFont.Weight = .regular, color: NSColor = .labelColor) -> NSTextField {
+        let l = NSTextField(wrappingLabelWithString: text)
+        l.font = .systemFont(ofSize: size, weight: weight); l.textColor = color
+        return l
+    }
+
+    static func make() -> NSWindow {
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 600),
+                         styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        w.title = "Mac Snap Help"
+        w.isReleasedWhenClosed = false
+
+        let grid = NSGridView(numberOfColumns: 4, rows: 0)
+        grid.rowSpacing = 16; grid.columnSpacing = 18
+        var row: [NSView] = []
+        for (zone, cursor, place) in cards {
+            let card = NSStackView(views: [MiniScreen(zone: zone, cursor: cursor),
+                                           label(place, size: 12, weight: .semibold),
+                                           label("→ " + zone.title.replacingOccurrences(of: "Maximize", with: "Full screen"), size: 11, color: .secondaryLabelColor)])
+            card.orientation = .vertical; card.alignment = .centerX; card.spacing = 4
+            row.append(card)
+            if row.count == 4 { grid.addRow(with: row); row = [] }
+        }
+        if !row.isEmpty { grid.addRow(with: row) }
+
+        let behavior = label("""
+        •  Grab a window by its title bar and drag it.
+        •  Push the mouse pointer right against the edge or into a corner of the screen.
+        •  A blue box shows where the window will go. Let go of the mouse to snap it there.
+        •  Changed your mind? Move away from the edge before letting go — nothing happens.
+        •  To unsnap, just drag the window away and resize it as usual.
+        •  The menu-bar icon shows the layout you are dragging to, then keeps showing the last one you used.
+        •  Works on every screen. On an edge between two screens the mouse passes through, so it doesn't snap there.
+        •  Mac Snap needs Accessibility access (System Settings › Privacy & Security › Accessibility).
+        """, size: 13)
+        behavior.preferredMaxLayoutWidth = 580
+
+        let stack = NSStackView(views: [label("Drag a window to an edge or corner", size: 20, weight: .bold), grid,
+                                       label("How it works", size: 15, weight: .semibold), behavior])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 14
+        stack.edgeInsets = NSEdgeInsets(top: 24, left: 30, bottom: 24, right: 30)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let content = NSView()
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor), stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: content.topAnchor), stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
+        w.contentView = content
+        return w
+    }
+}
+
+/// A tiny screen: the snapped area filled in, and a pointer at the edge you drag to.
+final class MiniScreen: NSView {
+    let zone: Zone, cursor: CGPoint
+    init(zone: Zone, cursor: CGPoint) {
+        self.zone = zone; self.cursor = cursor
+        super.init(frame: NSRect(x: 0, y: 0, width: 128, height: 84))
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 128).isActive = true
+        heightAnchor.constraint(equalToConstant: 84).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ dirty: NSRect) {
+        let scr = bounds.insetBy(dx: 6, dy: 6)
+        let body = NSBezierPath(roundedRect: scr, xRadius: 6, yRadius: 6)
+        NSColor.windowBackgroundColor.blended(withFraction: 0.08, of: .labelColor)?.setFill(); body.fill()
+        NSColor.separatorColor.setStroke(); body.lineWidth = 1; body.stroke()
+        // menu bar
+        let bar = NSRect(x: scr.minX, y: scr.maxY - 7, width: scr.width, height: 7)
+        NSGraphicsContext.saveGraphicsState(); body.addClip()
+        NSColor.labelColor.withAlphaComponent(0.12).setFill(); bar.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        // snapped area
+        let usable = NSRect(x: scr.minX, y: scr.minY, width: scr.width, height: scr.height - 7)
+        let target = zone.rect(in: usable).insetBy(dx: 3, dy: 3)
+        let fill = NSBezierPath(roundedRect: target, xRadius: 4, yRadius: 4)
+        NSColor.controlAccentColor.withAlphaComponent(0.35).setFill(); fill.fill()
+        NSColor.controlAccentColor.setStroke(); fill.lineWidth = 1.5; fill.stroke()
+        // pointer at the edge
+        let p = NSPoint(x: scr.minX + cursor.x * scr.width, y: scr.minY + cursor.y * scr.height)
+        let dot = NSBezierPath(ovalIn: NSRect(x: p.x - 5, y: p.y - 5, width: 10, height: 10))
+        NSColor.systemOrange.setFill(); dot.fill()
+        NSColor.white.setStroke(); dot.lineWidth = 1.5; dot.stroke()
+    }
 }
 
 // MARK: - App
@@ -314,16 +372,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         trustItem = NSMenuItem(title: "", action: #selector(openAXSettings), keyEquivalent: "")
         menu.addItem(trustItem)
         menu.addItem(.separator())
-        for z in [Zone.left, .right, .top, .bottom, .topLeft, .topRight, .bottomLeft, .bottomRight, .maximize] {
-            if z == .topLeft || z == .maximize { menu.addItem(.separator()) }
-            let mi = NSMenuItem(title: z.title, action: #selector(snapFromMenu(_:)), keyEquivalent: "")
-            mi.representedObject = z.rawValue
-            mi.target = self
-            menu.addItem(mi)
-        }
-        let r = NSMenuItem(title: "Restore", action: #selector(restoreFromMenu), keyEquivalent: "")
-        r.target = self
-        menu.addItem(r)
+        let help = NSMenuItem(title: "Help — How to Snap…", action: #selector(showHelp), keyEquivalent: "")
+        help.target = self
+        menu.addItem(help)
         menu.addItem(.separator())
         loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         loginItem.target = self
@@ -344,11 +395,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
-    @objc func snapFromMenu(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let z = Zone(rawValue: raw) else { return }
-        Actions.snapFront(z)
+    private var helpWindow: NSWindow?
+    @objc func showHelp() {
+        if helpWindow == nil { helpWindow = HelpWindow.make() }
+        NSApp.activate(ignoringOtherApps: true)
+        helpWindow?.center()
+        helpWindow?.makeKeyAndOrderFront(nil)
     }
-    @objc func restoreFromMenu() { Actions.restoreFront() }
 
     @objc func openAXSettings() {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)

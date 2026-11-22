@@ -1,5 +1,5 @@
 // End-to-end test: drags a real Finder window to each edge/corner with synthetic mouse events,
-// then the menu-bar menu items, and checks the window frame. Needs Mac Snap running + Accessibility for both.
+// then checks the menu (no window commands, Help opens), and checks the window frame. Needs Mac Snap running + Accessibility for both.
 //   swift Tests/e2e.swift
 import AppKit
 import ApplicationServices
@@ -82,24 +82,32 @@ for (name, target) in edges {
 let snapApp = NSRunningApplication.runningApplications(withBundleIdentifier: "com.emi2git.emisnap")[0]
 let extras: AXUIElement = attr(AXUIElementCreateApplication(snapApp.processIdentifier), kAXExtrasMenuBarAttribute)!
 let statusItem = (attr(extras, kAXChildrenAttribute) as [AXUIElement]?)![0]
-func pressMenu(_ title: String) {
-    finder.activate(); wait(0.3)
-    AXUIElementPerformAction(statusItem, kAXPressAction as CFString); wait(0.8)
-    let menu = (attr(statusItem, kAXChildrenAttribute) as [AXUIElement]?)![0]
-    let item = (attr(menu, kAXChildrenAttribute) as [AXUIElement]?)!.first { (attr($0, kAXTitleAttribute) as String?) == title }!
-    AXUIElementPerformAction(item, kAXPressAction as CFString); wait(0.5)
+// The menu has no window commands — only status, Help, Launch at Login, Quit.
+finder.activate(); wait(0.3)
+AXUIElementPerformAction(statusItem, kAXPressAction as CFString); wait(0.8)
+let menuEl = (attr(statusItem, kAXChildrenAttribute) as [AXUIElement]?)![0]
+let titles = (attr(menuEl, kAXChildrenAttribute) as [AXUIElement]?)!.compactMap { attr($0, kAXTitleAttribute) as String? }.filter { !$0.isEmpty }
+let banned = ["Left Half", "Right Half", "Maximize", "Restore", "Top Left", "Top Right", "Bottom Left", "Bottom Right"]
+let menuOK = titles.contains("Help — How to Snap…") && !titles.contains(where: banned.contains)
+if !menuOK { fails += 1 }
+print(menuOK ? "PASS" : "FAIL", "menu   items:", titles.joined(separator: " | "))
+// Help opens a window.
+do {
+    let help = (attr(menuEl, kAXChildrenAttribute) as [AXUIElement]?)!.first { (attr($0, kAXTitleAttribute) as String?) == "Help — How to Snap…" }!
+    AXUIElementPerformAction(help, kAXPressAction as CFString); wait(1)
+    let wins: [AXUIElement] = attr(AXUIElementCreateApplication(snapApp.processIdentifier), kAXWindowsAttribute) ?? []
+    let helpOK = wins.contains { (attr($0, kAXTitleAttribute) as String?) == "Mac Snap Help" }
+    if !helpOK { fails += 1 }
+    print(helpOK ? "PASS" : "FAIL", "help window opens")
+    if let hw = wins.first(where: { (attr($0, kAXTitleAttribute) as String?) == "Mac Snap Help" }) {
+        let f = frame(hw)
+        let t = Process(); t.launchPath = "/usr/sbin/screencapture"; t.arguments = ["-x", "-R", "\(Int(f.minX)),\(Int(f.minY)),\(Int(f.width)),\(Int(f.height))", NSTemporaryDirectory() + "macsnap-help.png"]
+        try? t.run(); t.waitUntilExit()
+        print("       screenshot:", NSTemporaryDirectory() + "macsnap-help.png")
+        let close: AXUIElement? = attr(hw, kAXCloseButtonAttribute)
+        if let close { AXUIElementPerformAction(close, kAXPressAction as CFString) }
+    }
 }
-let menuTitles = ["left": "Left Half", "right": "Right Half", "top": "Top Half", "bottom": "Bottom Half", "topLeft": "Top Left",
-                  "topRight": "Top Right", "bottomLeft": "Bottom Left", "bottomRight": "Bottom Right", "maximize": "Maximize"]
-for (name, title) in menuTitles.sorted(by: { $0.key < $1.key }) {
-    setFrame(win, start); finder.activate(); wait(0.4)
-    pressMenu(title)
-    check(name, "menu  ")
-}
-pressMenu("Restore")
-let r = frame(win), restoredOK = abs(r.minX - start.minX) < 3 && abs(r.width - start.width) < 3
-if !restoredOK { fails += 1 }
-print(restoredOK ? "PASS" : "FAIL", "menu   restore", restoredOK ? "" : "got \(r)")
 
 // No keyboard shortcuts: ⌃⌥← must leave the window alone.
 setFrame(win, start); finder.activate(); wait(0.4)
