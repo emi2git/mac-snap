@@ -304,14 +304,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let hotkeys = Hotkeys()
     private var trustItem: NSMenuItem!
     private var loginItem: NSMenuItem!
+    private var iconItem: NSMenuItem!
+    static let icons = [("Grid", "rectangle.split.2x2"), ("Halves", "rectangle.split.2x1"),
+                        ("Thirds", "rectangle.split.3x1"), ("Left Half", "rectangle.lefthalf.inset.filled"), ("Squares", "square.grid.2x2"), ("Window", "macwindow")]
+    private var iconSymbol: String { UserDefaults.standard.string(forKey: "icon") ?? "rectangle.split.2x2" }
+
+    private func applyIcon() {
+        item.button?.image = NSImage(systemSymbolName: iconSymbol, accessibilityDescription: "Mac Snap")
+            ?? NSImage(systemSymbolName: "rectangle.split.2x2", accessibilityDescription: "Mac Snap")
+    }
+    @objc func pickIcon(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(sender.representedObject as? String, forKey: "icon")
+        applyIcon()
+    }
 
     func applicationDidFinishLaunching(_ n: Notification) {
         AXUIElementSetMessagingTimeout(AX.system, 0.3)
         let trusted = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
         if !trusted { NSLog("Mac Snap: waiting for Accessibility permission") }
 
+        // On a notched MacBook a full menu bar hides new icons behind the notch — start near the clock instead.
+        // (⌘-drag the icon to move it; macOS remembers the spot.)
+        let posKey = "NSStatusItem Preferred Position MacSnap"
+        if UserDefaults.standard.object(forKey: posKey) == nil { UserDefaults.standard.set(230, forKey: posKey) }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "rectangle.split.2x2", accessibilityDescription: "Mac Snap")
+        item.autosaveName = "MacSnap"
+        applyIcon()
         let menu = NSMenu()
         menu.delegate = self
         trustItem = NSMenuItem(title: "", action: #selector(openAXSettings), keyEquivalent: "")
@@ -333,6 +351,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         r.keyEquivalentModifierMask = [.control, .option]; r.target = self
         menu.addItem(r)
         menu.addItem(.separator())
+        let iconMenu = NSMenu()
+        for (name, symbol) in AppDelegate.icons {
+            let mi = NSMenuItem(title: name, action: #selector(pickIcon(_:)), keyEquivalent: "")
+            mi.image = NSImage(systemSymbolName: symbol, accessibilityDescription: name)
+            mi.representedObject = symbol; mi.target = self
+            iconMenu.addItem(mi)
+        }
+        iconItem = NSMenuItem(title: "Menu Bar Icon", action: nil, keyEquivalent: "")
+        iconItem.submenu = iconMenu
+        menu.addItem(iconItem)
         loginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         loginItem.target = self
         menu.addItem(loginItem)
@@ -350,6 +378,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         trustItem.title = ok ? "✓ Accessibility allowed" : "⚠︎ Allow Accessibility access…"
         trustItem.target = ok ? nil : self
         trustItem.action = ok ? nil : #selector(openAXSettings)
+        for mi in iconItem.submenu?.items ?? [] { mi.state = (mi.representedObject as? String) == iconSymbol ? .on : .off }
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
 
