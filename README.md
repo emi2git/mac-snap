@@ -2,6 +2,17 @@
 
 Snap any Mac window into a half, a quarter or full screen by dragging it to the screen edge. No keyboard shortcuts. Like Magnet / Windows Snap.
 
+## Why
+
+I wanted Windows-style edge snapping on macOS without a paid app, a keyboard-shortcut cheat sheet or a background helper
+that phones home. Mac Snap is one Swift file, no dependencies, no network access, and does exactly one thing.
+
+## Stack
+
+- Swift 5.9+, AppKit, Accessibility API (`AXUIElement`) for moving windows, global `NSEvent` mouse monitors for drag tracking
+- `ServiceManagement` for launch at login, SF Symbols for the menu-bar icon
+- Single file (`Sources/main.swift`, ~430 lines), built with plain `swiftc` — no Xcode project
+
 ## Install
 
 ```sh
@@ -11,7 +22,9 @@ cd ~/git/apps/mac-snap
 ```
 
 `build.sh` builds the app, installs it to `~/Applications/Mac Snap.app` and starts it.
-Needs Xcode (or the Command Line Tools) for `swiftc`.
+Needs Xcode (or the Command Line Tools) for `swiftc`, macOS 14+.
+`build.sh` signs with my Apple Development identity so the Accessibility grant survives rebuilds; change the
+`codesign` line to your own identity (or `-s -` for ad-hoc signing).
 
 **First run:** macOS asks for **Accessibility** access — allow it in
 System Settings › Privacy & Security › Accessibility (turn on *Mac Snap*). Without it nothing snaps.
@@ -57,3 +70,7 @@ swift Tests/e2e.swift
 
 Drags a real Finder window to every edge/corner then checks the window's frame and the menu-bar icon, that the menu has no window commands, and that Help opens.
 (The terminal needs Accessibility access too.)
+
+## License
+
+[MIT](LICENSE)
